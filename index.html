@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>WW2 UK Bomb Map</title>
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet-search/dist/leaflet-search.min.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/nouislider@15.8.1/dist/nouislider.min.css" />
+  <style>
+    body, html { height: 100%; overflow: hidden; }
+    #app {
+        display: flex;
+        height: 100vh;
+        width: 100vw;
+        overflow: hidden;
+      }
+    #sidebar {
+        width: 260px;
+        max-width: 30%;
+        background: #f9f9f9;
+        border-right: 1px solid #ccc;
+        overflow-y: auto;
+        overflow-x: hidden;
+        padding: 10px;
+        box-sizing: border-box;
+      }
+    #map { flex: 1 1 auto; height: 100vh; width: 100%; min-width: 0; overflow: hidden; }
+    #sidebar h2 { font-size:16px; margin:0 0 10px; }
+    #sidebar h3 { font-size:13px; margin:12px 0 6px; text-transform:uppercase; opacity:.8; }
+    .section { margin-bottom:12px; }
+    .input { width:100%; max-width:100%; box-sizing:border-box; padding:8px 10px; border:1px solid #ddd; border-radius:8px; }
+    .hint { font-size:12px; opacity:.7; margin-top:4px; }
+    .leaflet-control-geocoder, .leaflet-control-search { display:none !important; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <aside id="sidebar">
+      <h2 style='margin-top:0; font-size:1.4em;'>The Blitz Mapped</h2>
+      <div class="section">
+        <h3>Place search</h3>
+        <input id="placeQuery" class="input" type="text" placeholder="Town, street, postcode…" />
+        <div class="hint">Type a place and press Enter</div>
+      </div>
+      <div class="section">
+        <h3>Dataset search</h3>
+        <input id="dataQuery" class="input" type="text" placeholder="Search your data (e.g., Location)" />
+        <div class="hint">Matches the <code>Location</code> field</div>
+      </div>
+      <div class="section">
+        <h3>Bomb Type</h3>
+        <label><input type="checkbox" class="bombTypeFilter" value="Incendiary" checked> Incendiary Bomb</label><br/>
+        <label><input type="checkbox" class="bombTypeFilter" value="Explosive" checked> Explosive Bomb</label>
+      </div>
+      <div class="section">
+        <h3>Status</h3>
+        <label><input type="checkbox" class="statusFilter" value="Exploded" checked> Exploded</label><br/>
+        <label><input type="checkbox" class="statusFilter" value="Unexploded" checked> Unexploded</label>
+      </div>
+      <div class="section">
+        <h3>Other</h3>
+        <label><input type="checkbox" id="togglePlanes"> Show Crashed Planes</label>
+      </div>
+      <div class="section">
+        <h3>Date range</h3>
+        <div id="date-range" style="margin:8px 0"></div>
+        <div style="display:flex;justify-content:space-between;font-size:12px;">
+          <span id="dmin">—</span>
+          <span id="dmax">—</span>
+        </div>
+      </div>
+      <div class="section">
+        <h3>Legend</h3>
+        <div>
+          <div><span style="display:inline-block;width:12px;height:12px;background:#c0392b;border:1px solid #111;margin-right:6px"></span>HE</div>
+          <div><span style="display:inline-block;width:12px;height:12px;background:#e67e22;border:1px solid #111;margin-right:6px"></span>Incendiary</div>
+          <div><span style="display:inline-block;width:12px;height:12px;background:#8e44ad;border:1px solid #111;margin-right:6px"></span>Parachute mine</div>
+        </div>
+      </div>
+    </aside>
+    <div id="map"></div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.js"></script>
+  <script src="https://unpkg.com/leaflet-search/dist/leaflet-search.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/nouislider@15.8.1/dist/nouislider.min.js"></script>
+  <script>
+    // --- Map setup ---
+    const map = L.map('map').setView([54.5,-3],6);
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',{
+      attribution:'&copy; OpenStreetMap &copy; CARTO',
+      subdomains:'abcd', maxZoom:20
+    }).addTo(map);
+
+    // --- Bomb points layer ---
+    function colorForType(t){
+      if(!t) return '#555';
+      const s=t.toLowerCase();
+      if(s.includes('incendiary')) return '#e67e22';
+      if(s.includes('he')) return '#c0392b';
+      if(s.includes('parachute')) return '#8e44ad';
+      return '#2c3e50';
+    }
+
+    function onEachFeature(feature,layer){
+      const p=feature.properties||{};
+      const bombTypeKey="Type of bomb (Incendiary Bomb= IB Explosive Bomb= EB, COB= Crude Oil Bomb)";
+      const detailsKey="Damage or other details (All dimensions at in ft unless stated)";
+      const html=`<strong>${p.Location||'Unknown location'}</strong><br/>
+        ${p.Time?`<div><b>Time:</b> ${p.Time}</div>`:''}
+        ${p[bombTypeKey]?`<div><b>Type:</b> ${p[bombTypeKey]}</div>`:''}
+        ${p[detailsKey]?`<div><b>Details:</b> ${p[detailsKey]}</div>`:''}`;
+      layer.bindPopup(html);
+    }
+
+    const bombsLayer=L.geoJSON(null,{
+      pointToLayer:(f,latlng)=>L.circleMarker(latlng,{radius:5,fillOpacity:.85,stroke:true,weight:1,color:'#111',fillColor:colorForType(f.properties?.["Type of bomb (Incendiary Bomb= IB Explosive Bomb= EB, COB= Crude Oil Bomb)"])}),
+      onEachFeature:onEachFeature
+    }).addTo(map);
+
+    // Ensure features array exists before any initialization
+    let allFeatures = [];
+
+    // --- Date slider helpers ---
+    const toTs=d=>{if(!d) return NaN; const parts=String(d).split('-').map(Number); return Date.UTC(parts[0],(parts[1]||1)-1,parts[2]||1)};
+    const fmt=ts=>isFinite(ts)?new Date(ts).toISOString().slice(0,10):'Unknown';
+
+    function deriveType(p){
+      const raw=(p?.type||p?.["Type of bomb (Incendiary Bomb= IB Explosive Bomb= EB, COB= Crude Oil Bomb)"]||'').toString().toLowerCase();
+      if(!raw) return null;
+      if(raw.includes('incendiary')||raw.includes(' ib')) return 'Incendiary';
+      if(raw.includes('explosive')||raw.includes(' he')||raw.includes(' eb')) return 'Explosive';
+      return null;
+    }
+    function deriveStatus(p){
+      const s=(p?.status||p?.Status||p?.Exploded||'').toString().toLowerCase();
+      const details=(p?.["Damage or other details (All dimensions at in ft unless stated)"]||'').toString().toLowerCase();
+      if(s.includes('unexploded')||details.includes('unexploded')||details.includes('uxb')) return 'Unexploded';
+      if(s.includes('exploded')||(!details.includes('unexploded')&&details)) return 'Exploded';
+      return 'Exploded';
+    }
+    function isCrashedPlane(p){
+      const txt=Object.values(p||{}).join(' ').toLowerCase();
+      return txt.includes('crashed plane')||txt.includes('aircraft crash')||txt.includes('plane crash')||txt.includes('a/c crash');
+    }
+
+    function applyFilter([lo,hi]){
+      const typeSelected=Array.from(document.querySelectorAll('.bombTypeFilter:checked')).map(el=>el.value);
+      const statusSelected=Array.from(document.querySelectorAll('.statusFilter:checked')).map(el=>el.value);
+      const showPlanes=document.getElementById('togglePlanes')?.checked;
+      const filtered=allFeatures.filter(f=>{
+        const p=f.properties||{};
+        const ts=toTs(p.date||p.Date||p.Time);
+        if(isFinite(ts)&&(ts<lo||ts>hi)) return false;
+        const t=deriveType(p);
+        if(t&&!typeSelected.some(sel=>t.toLowerCase().includes(sel.toLowerCase()))) return false;
+        const st=deriveStatus(p);
+        if(!statusSelected.includes(st)) return false;
+        if(!showPlanes && isCrashedPlane(p)) return false;
+        return true;
+      });
+      bombsLayer.clearLayers();
+      bombsLayer.addData({type:'FeatureCollection',features:filtered});
+    }
+
+    let filtersWired=false;
+    function initSlider(){
+      const dates=(allFeatures||[]).map(f=>toTs(f.properties?.date||f.properties?.Date||f.properties?.Time)).filter(Number.isFinite);
+      const minTs=dates.length?Math.min(...dates):Date.UTC(1939,0,1);
+      const maxTs=dates.length?Math.max(...dates):Date.UTC(1945,11,31);
+      const sliderEl=document.getElementById('date-range');
+      const dminEl=document.getElementById('dmin');
+      const dmaxEl=document.getElementById('dmax');
+      if(!sliderEl) return;
+      if(!sliderEl.noUiSlider){
+        noUiSlider.create(sliderEl,{start:[minTs,maxTs],connect:true,range:{min:minTs,max:maxTs},step:86400000});
+        sliderEl.noUiSlider.on('update',values=>{dminEl.textContent=fmt(+values[0]); dmaxEl.textContent=fmt(+values[1]);});
+        sliderEl.noUiSlider.on('change',values=>applyFilter(values.map(v=>+v)));
+      } else {
+        sliderEl.noUiSlider.updateOptions({range:{min:minTs,max:maxTs}});
+        sliderEl.noUiSlider.set([minTs,maxTs]);
+      }
+      dminEl.textContent=fmt(minTs); dmaxEl.textContent=fmt(maxTs);
+      applyFilter([minTs,maxTs]);
+
+      if(!filtersWired){
+        const reapply=()=>{const v=sliderEl.noUiSlider.get();applyFilter([+v[0],+v[1]]);};
+        document.querySelectorAll('.bombTypeFilter').forEach(el=>el.addEventListener('change',reapply));
+        document.querySelectorAll('.statusFilter').forEach(el=>el.addEventListener('change',reapply));
+        const planeToggle=document.getElementById('togglePlanes');
+        if(planeToggle) planeToggle.addEventListener('change',reapply);
+        filtersWired=true;
+      }
+    }
+
+    // Initialise slider immediately with default range
+    initSlider();
+    setTimeout(()=>map.invalidateSize(),150);
+
+    // --- Load external dataset ---
+    const DATA_URL='data/UK_data.geojson';
+    fetch(DATA_URL)
+      .then(r=>{if(!r.ok) throw new Error('HTTP '+r.status); return r.json();})
+      .then(data=>{
+        bombsLayer.clearLayers();
+        bombsLayer.addData(data);
+        allFeatures=data.features||[];
+        if(bombsLayer.getLayers().length) map.fitBounds(bombsLayer.getBounds(),{padding:[20,20]});
+        initSlider();
+      })
+      .catch(err=>{console.warn('Dataset fetch failed:',err);});
+
+    // --- Place search ---
+    const geocoder=(L.Control&&L.Control.Geocoder&&L.Control.Geocoder.nominatim)?L.Control.Geocoder.nominatim():null;
+    const placeInput=document.getElementById('placeQuery');
+    if(placeInput&&geocoder){
+      placeInput.addEventListener('keydown',e=>{
+        if(e.key==='Enter'){
+          const q=placeInput.value.trim(); if(!q) return;
+          geocoder.geocode(q,results=>{if(!results.length) return; const r=results[0];
+            if(r.bbox) map.fitBounds(r.bbox,{padding:[20,20]}); else if(r.center) map.setView([r.center.lat,r.center.lng],12);
+          });
+        }
+      });
+    }
+
+    // --- Dataset search (Location field) ---
+    const dataInput=document.getElementById('dataQuery');
+    if(dataInput){
+      dataInput.addEventListener('keydown',e=>{
+        if(e.key==='Enter'){
+          const q=dataInput.value.trim().toLowerCase(); if(!q) return;
+          let hit=null;
+          bombsLayer.eachLayer(layer=>{const loc=(layer.feature?.properties?.Location||'').toLowerCase(); if(!hit&&loc.includes(q)) hit=layer;});
+          if(hit){map.setView(hit.getLatLng(),12); hit.openPopup();}
+        }
+      });
+    }
+
+    window.addEventListener('load',()=>map.invalidateSize());
+    window.addEventListener('resize',()=>map.invalidateSize());
+  </script>
+</body>
+</html>
+
