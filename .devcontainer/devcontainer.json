@@ -1,0 +1,5 @@
+{
+  "name": "blitz-mapped",
+  "postCreateCommand": "bash -lc \"git config user.name 'codex-bot' && git config user.email 'codex-bot@users.noreply.github.com' && if [ -n \\\"$GITHUB_TOKEN\\\" ]; then git remote set-url origin https://x-access-token:${GITHUB_TOKEN}@github.com/MrBilliams/blitz-mapped.git; fi\"",
+  "postStartCommand": "bash -lc \"if [ -n \\\"$GITHUB_TOKEN\\\" ]; then git remote set-url origin https://x-access-token:${GITHUB_TOKEN}@github.com/MrBilliams/blitz-mapped.git; fi\""
+}
